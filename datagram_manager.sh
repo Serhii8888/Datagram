@@ -1,10 +1,36 @@
 #!/bin/bash
 
 SERVICE_PREFIX=datagram
-BINARY_URL="https://github.com/Datagram-Group/datagram-cli-release/releases/latest/download/datagram-cli-x86_64-linux"
+IMAGE_NAME=datagram-node
 BASE_PORT=5000
 
+function build_image() {
+    echo "🔹 Створюємо Dockerfile..."
+    cat << EOF > Dockerfile
+FROM ubuntu:20.04
+
+RUN apt-get update && apt-get install -y wget screen && rm -rf /var/lib/apt/lists/*
+
+RUN wget https://github.com/Datagram-Group/datagram-cli-release/releases/latest/download/datagram-cli-x86_64-linux \\
+    && mv datagram-cli-x86_64-linux /usr/bin/datagram-cli \\
+    && chmod +x /usr/bin/datagram-cli
+
+CMD ["/bin/bash", "-c", "screen -S datagram -d -m datagram-cli run -- -key \$DATAGRAM_KEY && tail -f /dev/null"]
+EOF
+
+    echo "🔹 Будуємо Docker-образ..."
+    if ! docker build -t $IMAGE_NAME .; then
+        echo "❌ Помилка при створенні Docker-образу. Перевірте інтернет та Dockerfile."
+        exit 1
+    fi
+
+    rm Dockerfile
+    echo "✅ Docker-образ $IMAGE_NAME створено."
+}
+
 function install_nodes() {
+    build_image
+
     echo "👉 Введіть ключі для нод (по одному в рядок)."
     echo "🔹 Після введення всіх ключів натисніть Enter на порожньому рядку для завершення."
 
@@ -16,111 +42,92 @@ function install_nodes() {
     done
 
     NODE_COUNT=${#NODE_KEYS[@]}
-    echo "🔹 Ви ввели $NODE_COUNT ключ(ів). Починаємо встановлення..."
+    echo "🔹 Ви ввели $NODE_COUNT ключ(ів). Починаємо запуск контейнерів..."
+
+    # Видаляємо старі контейнери
+    echo "🔹 Видалення старих контейнерів..."
+    docker ps -a --filter "name=${SERVICE_PREFIX}_" -q | xargs -r docker rm -f
 
     for (( i=0; i<NODE_COUNT; i++ )); do
         NODE_KEY="${NODE_KEYS[$i]}"
         NODE_NUM=$((i+1))
         PORT=$((BASE_PORT + i))
-        echo "🔹 Встановлення ноди #$NODE_NUM з ключем: $NODE_KEY, порт: $PORT"
+        CONTAINER_NAME="${SERVICE_PREFIX}_$NODE_NUM"
 
-        NODE_DIR="$HOME/${SERVICE_PREFIX}_$NODE_NUM"
-        SERVICE_NAME="${SERVICE_PREFIX}_$NODE_NUM"
+        echo "🔹 Запуск контейнера $CONTAINER_NAME з портом $PORT"
 
-        mkdir -p "$NODE_DIR"
-        cd "$NODE_DIR"
-
-        wget -O datagram-cli "$BINARY_URL"
-        chmod +x datagram-cli
-
-        sudo tee "/etc/systemd/system/${SERVICE_NAME}.service" > /dev/null << EOF
-[Unit]
-Description=Datagram Node #$NODE_NUM
-After=network.target
-
-[Service]
-User=$USER
-WorkingDirectory=$NODE_DIR
-ExecStart=$NODE_DIR/datagram-cli run -- -key $NODE_KEY -p $PORT
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-        sudo systemctl daemon-reload
-        sudo systemctl enable "$SERVICE_NAME"
-        sudo systemctl start "$SERVICE_NAME"
-
-        echo "✅ Нода #$NODE_NUM встановлена та запущена."
+        if ! docker run -d --name "$CONTAINER_NAME" -e DATAGRAM_KEY="$NODE_KEY" -p "$PORT:5000" $IMAGE_NAME; then
+            echo "❌ Помилка запуску контейнера $CONTAINER_NAME"
+        else
+            echo "✅ Контейнер $CONTAINER_NAME запущено (порт $PORT)"
+        fi
     done
+
+    echo "✅ Усі контейнери запущено. Використовуйте 'docker ps' для перегляду."
 }
 
 function restart_nodes() {
-    echo "♻️ Перезапуск всіх нод..."
-    mapfile -t services < <(systemctl list-units --type=service --state=running | grep "${SERVICE_PREFIX}_" | awk '{print $1}')
-    if [ ${#services[@]} -eq 0 ]; then
-        echo "❌ Немає запущених нод для перезапуску."
+    echo "♻️ Перезапуск всіх контейнерів..."
+    mapfile -t containers < <(docker ps --filter "name=${SERVICE_PREFIX}_" --format "{{.Names}}")
+    if [ ${#containers[@]} -eq 0 ]; then
+        echo "❌ Немає запущених контейнерів для перезапуску."
         return
     fi
-    for service in "${services[@]}"; do
-        sudo systemctl restart "$service"
-        echo "✅ Перезапущено $service"
+    for container in "${containers[@]}"; do
+        docker restart "$container"
+        echo "✅ Перезапущено $container"
     done
 }
 
 function view_logs() {
-    echo "📜 Активні ноди для перегляду логів:"
-    mapfile -t services < <(systemctl list-units --type=service --state=running | grep "${SERVICE_PREFIX}_" | awk '{print $1}')
-    if [ ${#services[@]} -eq 0 ]; then
-        echo "❌ Немає запущених нод."
+    echo "📜 Список контейнерів:"
+    mapfile -t containers < <(docker ps --filter "name=${SERVICE_PREFIX}_" --format "{{.Names}}")
+    if [ ${#containers[@]} -eq 0 ]; then
+        echo "❌ Немає запущених контейнерів."
         return
     fi
 
-    for i in "${!services[@]}"; do
-        echo "$((i+1)). ${services[$i]}"
+    for i in "${!containers[@]}"; do
+        echo "$((i+1)). ${containers[$i]}"
     done
 
-    read -p "👉 Введіть номер ноди для перегляду логів: " choice
+    read -p "👉 Введіть номер контейнера для перегляду логів: " choice
 
-    if ! [[ "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#services[@]} )); then
+    if ! [[ "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#containers[@]} )); then
         echo "❌ Невірний вибір."
         return
     fi
 
-    SERVICE_NAME="${services[$((choice-1))]}"
-    echo "📜 Вивід логів для $SERVICE_NAME. Для виходу натисніть Ctrl+C."
-    sudo journalctl -u "$SERVICE_NAME" -f
+    CONTAINER_NAME="${containers[$((choice-1))]}"
+    echo "📜 Логи для $CONTAINER_NAME. Для виходу натисніть Ctrl+C."
+    docker logs -f "$CONTAINER_NAME"
 }
 
 function remove_nodes() {
-    echo "⚠️ Видалення всіх нод, встановлених через цей скрипт..."
+    echo "⚠️ Видалення всіх контейнерів ${SERVICE_PREFIX}_..."
     read -p "Ви впевнені, що хочете видалити всі ноди? (y/n): " confirm
     if [[ "$confirm" == "y" ]]; then
-        mapfile -t services < <(systemctl list-units --type=service | grep "${SERVICE_PREFIX}_" | awk '{print $1}' | sed 's/\.service//')
-        if [ ${#services[@]} -eq 0 ]; then
-            echo "❌ Немає встановлених нод для видалення."
-            return
-        fi
-        for service in "${services[@]}"; do
-            echo "🛑 Зупинка та видалення $service"
-            sudo systemctl stop "$service"
-            sudo systemctl disable "$service"
-            sudo rm "/etc/systemd/system/${service}.service"
-            rm -rf "$HOME/${service}"
-        done
-        sudo systemctl daemon-reload
-        echo "✅ Усі ноди видалено."
+        docker ps -a --filter "name=${SERVICE_PREFIX}_" -q | xargs -r docker rm -f
+        echo "✅ Усі контейнери видалено."
     else
         echo "❌ Видалення скасовано."
     fi
 }
 
+# Перевірка встановлення Docker
+if ! command -v docker &> /dev/null; then
+    echo "❌ Docker не встановлено. Встановлюємо..."
+    sudo apt update
+    sudo apt install -y docker.io
+    sudo systemctl start docker
+    sudo systemctl enable docker
+    echo "✅ Docker встановлено та запущено."
+fi
+
 while true; do
     echo ""
-    echo "🚀 Меню керування багатьма нодами Datagram:"
-    echo "1️⃣ Встановити ноди"
+    echo "🚀 Меню керування багатьма нодами Datagram (Docker):"
+    echo "1️⃣ Встановити (запустити) ноди"
     echo "2️⃣ Перезапустити всі ноди"
     echo "3️⃣ Переглянути логи ноди"
     echo "4️⃣ Видалити всі ноди"
