@@ -3,21 +3,17 @@
 SERVICE_PREFIX=datagram
 BINARY_URL="https://github.com/Datagram-Group/datagram-cli-release/releases/latest/download/datagram-cli-x86_64-linux"
 
-# Введіть ключі для нод у цей масив (через окремі рядки)
-NODE_KEYS=(
-    "ключ1"
-    "ключ2"
-    "ключ3"
-    # додайте скільки потрібно
-)
-
 function install_nodes() {
-    local NODE_COUNT=${#NODE_KEYS[@]}
-    echo "🔹 Встановлення $NODE_COUNT нод..."
+    read -p "👉 Скільки нод встановити?: " NODE_COUNT
 
-    for (( i=0; i<NODE_COUNT; i++ )); do
+    declare -a NODE_KEYS
+    for (( i=1; i<=NODE_COUNT; i++ )); do
+        read -p "🔑 Введіть ключ для ноди #$i: " NODE_KEYS[$i]
+    done
+
+    for (( i=1; i<=NODE_COUNT; i++ )); do
         local NODE_KEY="${NODE_KEYS[$i]}"
-        local NODE_NUM=$((i+1))
+        local NODE_NUM=$i
         echo "🔹 Встановлення ноди #$NODE_NUM з ключем $NODE_KEY"
 
         NODE_DIR="$HOME/${SERVICE_PREFIX}_$NODE_NUM"
@@ -96,7 +92,7 @@ function remove_nodes() {
     read -p "Ви впевнені, що хочете видалити всі ноди? (y/n): " confirm
     if [[ "$confirm" == "y" ]]; then
         local services
-        mapfile -t services < <(systemctl list-units --type=service | grep "${SERVICE_PREFIX}_" | awk '{print $1}' | sed 's/\.service//')
+        mapfile -t services < <(systemctl list-units --type=service | grep "${SERVICE_PREFIX}_" | awk '{print $1}' | sed 's/\\.service//')
         if [ ${#services[@]} -eq 0 ]; then
             echo "❌ Немає встановлених нод для видалення."
             return
