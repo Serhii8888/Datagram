@@ -1,19 +1,27 @@
 #!/bin/bash
 
-# ========= Налаштування =========
 SERVICE_PREFIX=datagram
 BINARY_URL="https://github.com/Datagram-Group/datagram-cli-release/releases/latest/download/datagram-cli-x86_64-linux"
 
-# ========= Функція встановлення багатьох нод =========
+# Введіть ключі для нод у цей масив (через окремі рядки)
+NODE_KEYS=(
+    "ключ1"
+    "ключ2"
+    "ключ3"
+    # додайте скільки потрібно
+)
+
 function install_nodes() {
-    read -p "👉 Скільки нод встановити?: " NODE_COUNT
+    local NODE_COUNT=${#NODE_KEYS[@]}
+    echo "🔹 Встановлення $NODE_COUNT нод..."
 
-    for (( i=1; i<=NODE_COUNT; i++ )); do
-        echo "\n🔹 Встановлення ноди #$i..."
-        read -p "👉 Введіть ключ для ноди #$i: " NODE_KEY
+    for (( i=0; i<NODE_COUNT; i++ )); do
+        local NODE_KEY="${NODE_KEYS[$i]}"
+        local NODE_NUM=$((i+1))
+        echo "🔹 Встановлення ноди #$NODE_NUM з ключем $NODE_KEY"
 
-        NODE_DIR="$HOME/${SERVICE_PREFIX}_$i"
-        SERVICE_NAME="${SERVICE_PREFIX}_$i"
+        NODE_DIR="$HOME/${SERVICE_PREFIX}_$NODE_NUM"
+        SERVICE_NAME="${SERVICE_PREFIX}_$NODE_NUM"
 
         mkdir -p "$NODE_DIR"
         cd "$NODE_DIR"
@@ -21,10 +29,9 @@ function install_nodes() {
         wget -O datagram-cli "$BINARY_URL"
         chmod +x datagram-cli
 
-        # Створюємо systemd сервіс
         sudo tee "/etc/systemd/system/${SERVICE_NAME}.service" > /dev/null << EOF
 [Unit]
-Description=Datagram Node #$i
+Description=Datagram Node #$NODE_NUM
 After=network.target
 
 [Service]
@@ -42,40 +49,59 @@ EOF
         sudo systemctl enable "$SERVICE_NAME"
         sudo systemctl start "$SERVICE_NAME"
 
-        echo "✅ Нода #$i встановлена та запущена. Перевірити логи: journalctl -u $SERVICE_NAME -f"
+        echo "✅ Нода #$NODE_NUM встановлена та запущена."
     done
 }
 
-# ========= Функція перезапуску всіх нод =========
 function restart_nodes() {
     echo "♻️ Перезапуск всіх нод..."
-    for service in $(systemctl list-units --type=service --state=running | grep "${SERVICE_PREFIX}_" | awk '{print $1}'); do
+    local services
+    mapfile -t services < <(systemctl list-units --type=service --state=running | grep "${SERVICE_PREFIX}_" | awk '{print $1}')
+    if [ ${#services[@]} -eq 0 ]; then
+        echo "❌ Немає запущених нод для перезапуску."
+        return
+    fi
+    for service in "${services[@]}"; do
         sudo systemctl restart "$service"
         echo "✅ Перезапущено $service"
     done
 }
 
-# ========= Перегляд логів =========
 function view_logs() {
     echo "📜 Активні ноди для перегляду логів:"
-    systemctl list-units --type=service --state=running | grep "${SERVICE_PREFIX}_" | awk '{print NR ". " $1}'
-    read -p "👉 Введіть номер ноди для перегляду логів: " choice
-    SERVICE_NAME=$(systemctl list-units --type=service --state=running | grep "${SERVICE_PREFIX}_" | awk "NR==$choice {print \\$1}")
-
-    if [ -n "$SERVICE_NAME" ]; then
-        echo "📜 Вивід логів для $SERVICE_NAME. Для виходу натисніть Ctrl+C."
-        sudo journalctl -u "$SERVICE_NAME" -f
-    else
-        echo "❌ Невірний вибір."
+    mapfile -t services < <(systemctl list-units --type=service --state=running | grep "${SERVICE_PREFIX}_" | awk '{print $1}')
+    if [ ${#services[@]} -eq 0 ]; then
+        echo "❌ Немає запущених нод."
+        return
     fi
+
+    for i in "${!services[@]}"; do
+        echo "$((i+1)). ${services[$i]}"
+    done
+
+    read -p "👉 Введіть номер ноди для перегляду логів: " choice
+
+    if ! [[ "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#services[@]} )); then
+        echo "❌ Невірний вибір."
+        return
+    fi
+
+    SERVICE_NAME="${services[$((choice-1))]}"
+    echo "📜 Вивід логів для $SERVICE_NAME. Для виходу натисніть Ctrl+C."
+    sudo journalctl -u "$SERVICE_NAME" -f
 }
 
-# ========= Видалення всіх нод =========
 function remove_nodes() {
     echo "⚠️ Видалення всіх нод, встановлених через цей скрипт..."
     read -p "Ви впевнені, що хочете видалити всі ноди? (y/n): " confirm
     if [[ "$confirm" == "y" ]]; then
-        for service in $(systemctl list-units --type=service | grep "${SERVICE_PREFIX}_" | awk '{print $1}' | sed 's/\.service//'); do
+        local services
+        mapfile -t services < <(systemctl list-units --type=service | grep "${SERVICE_PREFIX}_" | awk '{print $1}' | sed 's/\.service//')
+        if [ ${#services[@]} -eq 0 ]; then
+            echo "❌ Немає встановлених нод для видалення."
+            return
+        fi
+        for service in "${services[@]}"; do
             echo "🛑 Зупинка та видалення $service"
             sudo systemctl stop "$service"
             sudo systemctl disable "$service"
@@ -89,9 +115,9 @@ function remove_nodes() {
     fi
 }
 
-# ========= Меню =========
 while true; do
-    echo "\n🚀 Меню керування багатьма нодами Datagram:"
+    echo ""
+    echo "🚀 Меню керування багатьма нодами Datagram:"
     echo "1️⃣ Встановити ноди"
     echo "2️⃣ Перезапустити всі ноди"
     echo "3️⃣ Переглянути логи ноди"
