@@ -2,6 +2,7 @@
 
 SERVICE_PREFIX=datagram
 BINARY_URL="https://github.com/Datagram-Group/datagram-cli-release/releases/latest/download/datagram-cli-x86_64-linux"
+BASE_PORT=5000
 
 function install_nodes() {
     echo "👉 Введіть ключі для нод (по одному в рядок)."
@@ -20,7 +21,8 @@ function install_nodes() {
     for (( i=0; i<NODE_COUNT; i++ )); do
         NODE_KEY="${NODE_KEYS[$i]}"
         NODE_NUM=$((i+1))
-        echo "🔹 Встановлення ноди #$NODE_NUM з ключем: $NODE_KEY"
+        PORT=$((BASE_PORT + i))
+        echo "🔹 Встановлення ноди #$NODE_NUM з ключем: $NODE_KEY, порт: $PORT"
 
         NODE_DIR="$HOME/${SERVICE_PREFIX}_$NODE_NUM"
         SERVICE_NAME="${SERVICE_PREFIX}_$NODE_NUM"
@@ -39,7 +41,7 @@ After=network.target
 [Service]
 User=$USER
 WorkingDirectory=$NODE_DIR
-ExecStart=$NODE_DIR/datagram-cli run -- -key $NODE_KEY
+ExecStart=$NODE_DIR/datagram-cli run -- -key $NODE_KEY -p $PORT
 Restart=always
 RestartSec=5
 
