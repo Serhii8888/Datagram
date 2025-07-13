@@ -9,18 +9,18 @@ function build_image() {
     cat << EOF > Dockerfile
 FROM ubuntu:20.04
 
-RUN apt-get update && apt-get install -y wget && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y wget screen && rm -rf /var/lib/apt/lists/*
 
 RUN wget https://github.com/Datagram-Group/datagram-cli-release/releases/latest/download/datagram-cli-x86_64-linux \\
     && mv datagram-cli-x86_64-linux /usr/bin/datagram-cli \\
     && chmod +x /usr/bin/datagram-cli
 
-CMD ["datagram-cli", "run", "--", "-key", "\${DATAGRAM_KEY}"]
+CMD ["/bin/bash", "-c", "screen -S datagram -d -m datagram-cli run -- -key \$DATAGRAM_KEY && tail -f /dev/null"]
 EOF
 
     echo "🔹 Будуємо Docker-образ..."
     if ! docker build -t $IMAGE_NAME .; then
-        echo "❌ Помилка при створенні Docker-образу. Перевірте інтернет або Dockerfile."
+        echo "❌ Помилка при створенні Docker-образу. Перевірте інтернет та Dockerfile."
         exit 1
     fi
 
@@ -31,8 +31,8 @@ EOF
 function install_nodes() {
     build_image
 
-    echo "👉 Введіть ключі для нод (по одному у стовпчик)."
-    echo "🔹 Після завершення введення натисніть Enter на порожньому рядку."
+    echo "👉 Введіть ключі для нод (по одному в рядок)."
+    echo "🔹 Після введення всіх ключів натисніть Enter на порожньому рядку для завершення."
 
     NODE_KEYS=()
     while true; do
@@ -44,25 +44,26 @@ function install_nodes() {
     NODE_COUNT=${#NODE_KEYS[@]}
     echo "🔹 Ви ввели $NODE_COUNT ключ(ів). Починаємо запуск контейнерів..."
 
-    echo "🔹 Видалення попередніх контейнерів..."
+    # Видаляємо старі контейнери
+    echo "🔹 Видалення старих контейнерів..."
     docker ps -a --filter "name=${SERVICE_PREFIX}_" -q | xargs -r docker rm -f
 
     for (( i=0; i<NODE_COUNT; i++ )); do
         NODE_KEY="${NODE_KEYS[$i]}"
         NODE_NUM=$((i+1))
         PORT=$((BASE_PORT + i))
-        CONTAINER_NAME="${SERVICE_PREFIX}_${NODE_NUM}"
+        CONTAINER_NAME="${SERVICE_PREFIX}_$NODE_NUM"
 
-        echo "🔹 Запуск контейнера $CONTAINER_NAME на порту $PORT"
+        echo "🔹 Запуск контейнера $CONTAINER_NAME з портом $PORT"
 
-        if docker run -d --name "$CONTAINER_NAME" -e DATAGRAM_KEY="$NODE_KEY" -p "$PORT:5000" $IMAGE_NAME; then
-            echo "✅ Контейнер $CONTAINER_NAME запущено (порт $PORT)"
-        else
+        if ! docker run -d --name "$CONTAINER_NAME" -e DATAGRAM_KEY="$NODE_KEY" -p "$PORT:5000" $IMAGE_NAME; then
             echo "❌ Помилка запуску контейнера $CONTAINER_NAME"
+        else
+            echo "✅ Контейнер $CONTAINER_NAME запущено (порт $PORT)"
         fi
     done
 
-    echo "✅ Усі ноди запущено. Використовуйте 'docker ps' для перегляду."
+    echo "✅ Усі контейнери запущено. Використовуйте 'docker ps' для перегляду."
 }
 
 function restart_nodes() {
@@ -107,7 +108,7 @@ function remove_nodes() {
     read -p "Ви впевнені, що хочете видалити всі ноди? (y/n): " confirm
     if [[ "$confirm" == "y" ]]; then
         docker ps -a --filter "name=${SERVICE_PREFIX}_" -q | xargs -r docker rm -f
-        echo "✅ Усі ноди видалено."
+        echo "✅ Усі контейнери видалено."
     else
         echo "❌ Видалення скасовано."
     fi
@@ -115,7 +116,7 @@ function remove_nodes() {
 
 # Перевірка встановлення Docker
 if ! command -v docker &> /dev/null; then
-    echo "❌ Docker не встановлено. Виконуємо встановлення..."
+    echo "❌ Docker не встановлено. Встановлюємо..."
     sudo apt update
     sudo apt install -y docker.io
     sudo systemctl start docker
