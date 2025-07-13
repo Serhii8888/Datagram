@@ -4,17 +4,23 @@ SERVICE_PREFIX=datagram
 BINARY_URL="https://github.com/Datagram-Group/datagram-cli-release/releases/latest/download/datagram-cli-x86_64-linux"
 
 function install_nodes() {
-    read -p "👉 Скільки нод встановити?: " NODE_COUNT
+    echo "👉 Введіть ключі для нод (по одному в рядок)."
+    echo "🔹 Після введення всіх ключів натисніть Enter на порожньому рядку для завершення."
 
-    declare -a NODE_KEYS
-    for (( i=1; i<=NODE_COUNT; i++ )); do
-        read -p "🔑 Введіть ключ для ноди #$i: " NODE_KEYS[$i]
+    NODE_KEYS=()
+    while true; do
+        read -r key
+        [[ -z "$key" ]] && break
+        NODE_KEYS+=("$key")
     done
 
-    for (( i=1; i<=NODE_COUNT; i++ )); do
-        local NODE_KEY="${NODE_KEYS[$i]}"
-        local NODE_NUM=$i
-        echo "🔹 Встановлення ноди #$NODE_NUM з ключем $NODE_KEY"
+    NODE_COUNT=${#NODE_KEYS[@]}
+    echo "🔹 Ви ввели $NODE_COUNT ключ(ів). Починаємо встановлення..."
+
+    for (( i=0; i<NODE_COUNT; i++ )); do
+        NODE_KEY="${NODE_KEYS[$i]}"
+        NODE_NUM=$((i+1))
+        echo "🔹 Встановлення ноди #$NODE_NUM з ключем: $NODE_KEY"
 
         NODE_DIR="$HOME/${SERVICE_PREFIX}_$NODE_NUM"
         SERVICE_NAME="${SERVICE_PREFIX}_$NODE_NUM"
@@ -51,7 +57,6 @@ EOF
 
 function restart_nodes() {
     echo "♻️ Перезапуск всіх нод..."
-    local services
     mapfile -t services < <(systemctl list-units --type=service --state=running | grep "${SERVICE_PREFIX}_" | awk '{print $1}')
     if [ ${#services[@]} -eq 0 ]; then
         echo "❌ Немає запущених нод для перезапуску."
@@ -91,8 +96,7 @@ function remove_nodes() {
     echo "⚠️ Видалення всіх нод, встановлених через цей скрипт..."
     read -p "Ви впевнені, що хочете видалити всі ноди? (y/n): " confirm
     if [[ "$confirm" == "y" ]]; then
-        local services
-        mapfile -t services < <(systemctl list-units --type=service | grep "${SERVICE_PREFIX}_" | awk '{print $1}' | sed 's/\\.service//')
+        mapfile -t services < <(systemctl list-units --type=service | grep "${SERVICE_PREFIX}_" | awk '{print $1}' | sed 's/\.service//')
         if [ ${#services[@]} -eq 0 ]; then
             echo "❌ Немає встановлених нод для видалення."
             return
