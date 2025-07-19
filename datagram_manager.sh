@@ -60,6 +60,8 @@ function install_nodes() {
             echo "❌ Помилка запуску контейнера $CONTAINER_NAME"
         else
             echo "✅ Контейнер $CONTAINER_NAME запущено (порт $PORT)"
+            echo "⏳ Затримка 20 секунд перед запуском наступного контейнера..."
+            sleep 20
         fi
     done
 
@@ -76,6 +78,8 @@ function restart_nodes() {
     for container in "${containers[@]}"; do
         docker restart "$container"
         echo "✅ Перезапущено $container"
+        echo "⏳ Затримка 20 секунд перед перезапуском наступного контейнера..."
+        sleep 20
     done
 }
 
