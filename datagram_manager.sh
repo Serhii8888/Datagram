@@ -60,8 +60,8 @@ function install_nodes() {
             echo "❌ Помилка запуску контейнера $CONTAINER_NAME"
         else
             echo "✅ Контейнер $CONTAINER_NAME запущено (порт $PORT)"
-            echo "⏳ Затримка 20 секунд перед запуском наступного контейнера..."
-            sleep 20
+            echo "⏳ Затримка 5 секунд перед запуском наступного контейнера..."
+            sleep 5
         fi
     done
 
