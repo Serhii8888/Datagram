@@ -56,7 +56,7 @@ function install_nodes() {
 
         echo "🔹 Запуск контейнера $CONTAINER_NAME з портом $PORT"
 
-        if ! docker run -d --name "$CONTAINER_NAME" -e DATAGRAM_KEY="$NODE_KEY" -p "$PORT:5000" $IMAGE_NAME; then
+        if ! docker run -d --restart unless-stopped --name "$CONTAINER_NAME" -e DATAGRAM_KEY="$NODE_KEY" -p "$PORT:5000" $IMAGE_NAME; then
             echo "❌ Помилка запуску контейнера $CONTAINER_NAME"
         else
             echo "✅ Контейнер $CONTAINER_NAME запущено (порт $PORT)"
